@@ -1,5 +1,7 @@
 package io.github.biliaudioplayer.model
 
+import io.github.biliaudioplayer.update.UpdateUiState
+
 data class UserProfile(val mid: Long, val name: String, val avatar: String = "")
 data class FavoriteFolder(val id: Long, val title: String, val cover: String = "", val mediaCount: Int = 0)
 data class FavoriteVideo(
@@ -9,6 +11,7 @@ data class FavoriteVideo(
 data class Track(
     val bvid: String, val cid: Long, val page: Int, val title: String, val videoTitle: String,
     val cover: String = "", val owner: String = "", val durationSeconds: Int = 0,
+    val sourceFolder: FavoriteFolder? = null,
 ) {
     val id: String get() = "$bvid:$cid"
     val displayTitle: String get() = title.ifBlank { videoTitle }
@@ -21,6 +24,8 @@ data class AudioStream(val url: String, val backupUrls: List<String> = emptyList
 
 enum class Screen { LOGIN, HOME, FOLDER, PARTS, PLAYER, QUEUE, SETTINGS }
 enum class PlayMode(val label: String) { SEQUENTIAL("顺序播放"), LOOP("列表循环"), ONE("单曲循环"), SHUFFLE("随机播放") }
+
+data class ListTarget(val screen: Screen, val id: String, val requestId: Long)
 data class PlaybackUiState(
     val connected: Boolean = false, val currentId: String? = null, val isPlaying: Boolean = false,
     val isBuffering: Boolean = false, val positionMs: Long = 0, val durationMs: Long = 0,
@@ -38,6 +43,8 @@ data class AppUiState(
     val videoQuery: String = "", val partQuery: String = "",
     val queue: List<Track> = emptyList(), val queueTitle: String = "", val buildingQueue: Boolean = false,
     val queueProgress: String = "", val playback: PlaybackUiState = PlaybackUiState(), val message: String? = null,
+    val listTarget: ListTarget? = null,
+    val update: UpdateUiState = UpdateUiState(),
 ) {
     val currentTrack: Track? get() = queue.firstOrNull { it.id == playback.currentId }
 }
@@ -58,4 +65,8 @@ data class AppActions(
     val partQuery: (String) -> Unit = {},
     val openAppLogin: () -> Unit = {},
     val useQrLogin: () -> Unit = {},
+    val locateCurrent: () -> Unit = {},
+    val checkUpdate: () -> Unit = {},
+    val downloadUpdate: () -> Unit = {},
+    val installUpdate: () -> Unit = {},
 )

@@ -2,7 +2,8 @@ param(
     [string[]]$Tasks = @('assembleDebug', 'testDebugUnitTest', 'lintDebug'),
     [string]$JavaHome = $env:JAVA_HOME,
     [string]$SdkRoot = $env:ANDROID_HOME,
-    [switch]$Offline
+    [switch]$Offline,
+    [switch]$NoPublish
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,6 +27,11 @@ $env:GRADLE_USER_HOME = Join-Path $projectRoot '.tools\gradle-user-home'
 $env:Path = (Join-Path $JavaHome 'bin') + ';' + $env:Path
 $arguments = @('--no-daemon', '--console=plain') + $Tasks
 if ($Offline) { $arguments += '--offline' }
+$apkRoot = Join-Path $projectRoot 'app\build\outputs\apk'
+$beforeBuild = @{}
+Get-ChildItem $apkRoot -Recurse -Filter '*.apk' -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '[\\/]androidTest[\\/]' } | ForEach-Object {
+    $beforeBuild[$_.FullName] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+}
 Push-Location $projectRoot
 try {
     $gradleCommand = Join-Path $projectRoot '.tools\gradle-8.11.1\bin\gradle.bat'
@@ -34,4 +40,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Gradle failed with exit code $LASTEXITCODE." }
 } finally {
     Pop-Location
+}
+
+$buildsApplication = @($Tasks | Where-Object { ($_ -split ':')[-1] -match '^(assemble(Debug|Release)?|build)$' }).Count -gt 0
+if (-not $NoPublish -and $buildsApplication) {
+    $changedApks = @(Get-ChildItem $apkRoot -Recurse -Filter '*.apk' -ErrorAction SilentlyContinue | Where-Object {
+        $_.FullName -notmatch '[\\/]androidTest[\\/]' -and $beforeBuild[$_.FullName] -ne (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+    })
+    if ($changedApks.Count -gt 1) { throw 'Multiple application APKs changed. Publish one explicitly with scripts\publish-release.ps1 -ApkPath, or build a single variant.' }
+    if ($changedApks.Count -eq 1) {
+        & (Join-Path $PSScriptRoot 'publish-release.ps1') -ApkPath $changedApks[0].FullName -SdkRoot $SdkRoot
+    } else {
+        Write-Host 'Application APK unchanged; no release published.'
+    }
 }

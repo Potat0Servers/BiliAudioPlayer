@@ -7,10 +7,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasScrollAction
-import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
@@ -36,6 +35,9 @@ import io.github.biliaudioplayer.model.Screen
 import io.github.biliaudioplayer.model.Track
 import io.github.biliaudioplayer.model.PlaybackUiState
 import io.github.biliaudioplayer.model.LoginMethod
+import io.github.biliaudioplayer.model.ListTarget
+import io.github.biliaudioplayer.playback.toMediaItem
+import io.github.biliaudioplayer.playback.toTrack
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -178,17 +180,11 @@ class BiliAppTest {
         assertEquals("Player must fit without vertical scrolling", 0f, range.maxValue(), 1f)
     }
 
-    @Test fun version101SettingsIsEmptyAndBothListRailsJumpToEnd() {
-        val ui = mutableStateOf(AppUiState(screen = Screen.HOME, checkingSession = false))
-        compose.setContent { BiliApp(ui.value, actions(showSettings = { ui.value = ui.value.copy(screen = Screen.SETTINGS) })) }
-        compose.onNodeWithContentDescription("设置").performClick()
-        compose.onNodeWithText("设置").assertIsDisplayed()
-        compose.onAllNodes(hasClickAction()).assertCountEquals(1) // Only the back button; settings content is empty.
-        compose.runOnIdle {
-            ui.value = AppUiState(screen = Screen.FOLDER, checkingSession = false,
-                videos = (1..80).map { FavoriteVideo("BVfixture$it", "视频 $it") })
-        }
-        compose.onNodeWithContentDescription("快速滚动条").performTouchInput {
+    @Test fun version013Both48DpListRailsJumpToEnd() {
+        val ui = mutableStateOf(AppUiState(screen = Screen.FOLDER, checkingSession = false,
+            videos = (1..80).map { FavoriteVideo("BVfixture$it", "视频 $it") }))
+        compose.setContent { BiliApp(ui.value, actions()) }
+        compose.onNodeWithContentDescription("快速滚动条").assertWidthIsEqualTo(48.dp).performTouchInput {
             swipe(center.copy(y = 1f), center.copy(y = height - 1f), durationMillis = 400)
         }
         compose.onNodeWithText("视频 80").assertIsDisplayed()
@@ -196,8 +192,48 @@ class BiliAppTest {
             ui.value = AppUiState(screen = Screen.PARTS, checkingSession = false,
                 parts = (1..80).map { Track("BVfixture", it.toLong(), it, "曲目 $it", "合集") })
         }
-        compose.onNodeWithContentDescription("快速滚动条").performTouchInput {
+        compose.onNodeWithContentDescription("快速滚动条").assertWidthIsEqualTo(48.dp).performTouchInput {
             swipe(center.copy(y = 1f), center.copy(y = height - 1f), durationMillis = 400)
+        }
+        compose.onNodeWithText("曲目 80").assertIsDisplayed()
+    }
+
+    @Test fun version013PlayerLocationAndQueueButtonsHaveIndependentActions() {
+        var located = 0
+        var openedQueue = 0
+        compose.setContent {
+            BiliApp(AppUiState(screen = Screen.PLAYER, checkingSession = false,
+                queue = listOf(first), queueTitle = "我的收藏",
+                playback = PlaybackUiState(connected = true, currentId = first.id)),
+                actions(locateCurrent = { located++ }, showQueue = { openedQueue++ }))
+        }
+        compose.onNodeWithContentDescription("定位当前曲目").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(1, located); assertEquals(0, openedQueue) }
+        compose.onNodeWithContentDescription("打开播放队列").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(1, located); assertEquals(1, openedQueue) }
+    }
+
+    @Test fun version013PlaybackMetadataRetainsSourceFolder() {
+        val source = FavoriteFolder(42, "播放来源", "https://example.invalid/cover", 80)
+        val track = second.copy(sourceFolder = source)
+        assertEquals(track, track.toMediaItem().toTrack())
+        assertEquals(second, second.toMediaItem().toTrack())
+    }
+
+    @Test fun version013LocationScrollsToTargetAfterPinnedOrderingOnBothLists() {
+        val videos = (1..80).map { FavoriteVideo("BVfixture$it", "视频 $it") }
+        val parts = (1..80).map { Track("BVfixture", it.toLong(), it, "曲目 $it", "合集") }
+        val ui = mutableStateOf(AppUiState(screen = Screen.FOLDER, checkingSession = false,
+            selectedFolder = FavoriteFolder(1, "来源收藏夹"), videos = videos,
+            pinnedVideos = videos.takeLast(20).map { it.bvid }.toSet(),
+            listTarget = ListTarget(Screen.FOLDER, videos.last().bvid, 1)))
+        compose.setContent { BiliApp(ui.value, actions()) }
+        compose.onNodeWithText("视频 80").assertIsDisplayed()
+        compose.runOnIdle {
+            ui.value = AppUiState(screen = Screen.PARTS, checkingSession = false,
+                selectedVideo = FavoriteVideo("BVfixture", "合集"), parts = parts,
+                pinnedParts = parts.takeLast(20).map { it.id }.toSet(),
+                listTarget = ListTarget(Screen.PARTS, parts.last().id, 2))
         }
         compose.onNodeWithText("曲目 80").assertIsDisplayed()
     }
@@ -258,6 +294,8 @@ class BiliAppTest {
         showSettings: () -> Unit = {},
         videoQuery: (String) -> Unit = {},
         partQuery: (String) -> Unit = {},
+        locateCurrent: () -> Unit = {},
+        showQueue: () -> Unit = {},
     ) = AppActions(
         back = back,
         refresh = {},
@@ -269,7 +307,7 @@ class BiliAppTest {
         pinFolder = {},
         pinPart = pinPart,
         showPlayer = {},
-        showQueue = {},
+        showQueue = showQueue,
         playQueueIndex = playQueueIndex,
         togglePlay = {},
         previous = {},
@@ -281,5 +319,6 @@ class BiliAppTest {
         showSettings = showSettings,
         videoQuery = videoQuery,
         partQuery = partQuery,
+        locateCurrent = locateCurrent,
     )
 }

@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
@@ -141,7 +142,7 @@ fun BiliApp(state: AppUiState, actions: AppActions) {
                     state.screen == Screen.PARTS -> PartsScreen(state, actions) { fullTitle = it }
                     state.screen == Screen.PLAYER -> PlayerScreen(state, actions)
                     state.screen == Screen.QUEUE -> QueueScreen(state, actions)
-                    state.screen == Screen.SETTINGS -> Column(Modifier.fillMaxSize()) { PageHeader("设置", actions.back) }
+                    state.screen == Screen.SETTINGS -> UpdateSettings(state.update, actions.checkUpdate, actions.downloadUpdate, actions.installUpdate, actions.back)
                 }
             }
         }
@@ -329,7 +330,9 @@ private fun FolderScreen(state: AppUiState, actions: AppActions, showFullTitle: 
         PageHeader("收藏夹", actions.back, actions.refresh, state.busy)
         TitleSearchField(state.videoQuery, "稿件", actions.videoQuery)
         if (state.busy && state.videos.isNotEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth())
-        FastScrollList(resetKey = state.videoQuery) {
+        val target = state.listTarget?.takeIf { it.screen == Screen.FOLDER }
+        val targetIndex = target?.let { request -> visibleVideos.indexOfFirst { it.bvid == request.id }.takeIf { it >= 0 }?.plus(1) }
+        FastScrollList(resetKey = state.videoQuery, targetIndex = targetIndex, targetRequest = target?.requestId) {
             item {
                 Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
                     Artwork(state.selectedFolder?.cover.orEmpty(), Modifier.size(98.dp))
@@ -378,7 +381,9 @@ private fun PartsScreen(state: AppUiState, actions: AppActions, showFullTitle: (
         PageHeader("分 P 曲目", actions.back, actions.refresh, state.busy)
         TitleSearchField(state.partQuery, "分P", actions.partQuery)
         if (state.busy && state.parts.isNotEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth())
-        FastScrollList(resetKey = state.partQuery) {
+        val target = state.listTarget?.takeIf { it.screen == Screen.PARTS }
+        val targetIndex = target?.let { request -> visibleParts.indexOfFirst { it.id == request.id }.takeIf { it >= 0 }?.plus(1) }
+        FastScrollList(resetKey = state.partQuery, targetIndex = targetIndex, targetRequest = target?.requestId) {
             item {
                 Column(Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
                     Artwork(state.selectedVideo?.cover.orEmpty(), Modifier.fillMaxWidth().aspectRatio(16f / 9f))
@@ -460,7 +465,7 @@ private fun EntryMenu(title: String, pinned: Boolean, pin: () -> Unit, copy: () 
 @Composable
 private fun PlayerScreen(state: AppUiState, actions: AppActions) {
     Column(Modifier.fillMaxSize()) {
-        PageHeader("正在播放", actions.back, queue = actions.showQueue)
+        PageHeader("正在播放", actions.back, locate = actions.locateCurrent, busy = state.busy)
         val track = state.currentTrack
         if (track == null) {
             EmptyState("还没有正在播放的曲目", "从收藏夹选择一首喜欢的歌。", Modifier.weight(1f))
@@ -622,11 +627,12 @@ private fun PlayButton(playback: PlaybackUiState, toggle: () -> Unit, large: Boo
 }
 
 @Composable
-private fun PageHeader(title: String, back: () -> Unit, refresh: (() -> Unit)? = null, busy: Boolean = false, queue: (() -> Unit)? = null) {
+private fun PageHeader(title: String, back: () -> Unit, refresh: (() -> Unit)? = null, busy: Boolean = false, queue: (() -> Unit)? = null, locate: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
         Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
         when {
+            locate != null -> IconButton(onClick = locate, enabled = !busy) { Icon(Icons.Default.MyLocation, "定位当前曲目", tint = Muted) }
             refresh != null -> IconButton(onClick = refresh, enabled = !busy) { Icon(Icons.Default.Refresh, "刷新", tint = Muted) }
             queue != null -> IconButton(onClick = queue) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "打开播放队列", tint = Muted) }
             else -> Spacer(Modifier.size(48.dp))

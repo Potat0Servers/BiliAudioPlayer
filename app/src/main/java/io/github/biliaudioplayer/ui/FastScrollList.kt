@@ -23,13 +23,13 @@ import kotlin.math.roundToInt
 
 /** A draggable right rail targets item indices, so jumps do not require traversing intermediate rows. */
 @Composable
-internal fun FastScrollList(resetKey: Any? = null, content: LazyListScope.() -> Unit) {
+internal fun FastScrollList(resetKey: Any? = null, targetIndex: Int? = null, targetRequest: Long? = null, content: LazyListScope.() -> Unit) {
     val listState = rememberLazyListState()
-    LaunchedEffect(resetKey) { listState.scrollToItem(0) }
+    LaunchedEffect(resetKey, targetIndex, targetRequest) { listState.scrollToItem(targetIndex ?: 0) }
     val requests = remember { Channel<Int>(Channel.CONFLATED) }
     LaunchedEffect(listState) { for (index in requests) listState.scrollToItem(index) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        LazyColumn(state = listState, contentPadding = PaddingValues(end = 24.dp, bottom = 24.dp), content = content)
+        LazyColumn(state = listState, contentPadding = PaddingValues(end = 48.dp, bottom = 24.dp), content = content)
         val info = listState.layoutInfo
         if (info.totalItemsCount > 0 && (listState.canScrollForward || listState.canScrollBackward)) {
             val viewport = with(LocalDensity.current) { maxHeight.toPx() }
@@ -43,7 +43,7 @@ internal fun FastScrollList(resetKey: Any? = null, content: LazyListScope.() -> 
                 requests.trySend((proportion * (info.totalItemsCount - 1)).roundToInt())
             }
             Box(
-                Modifier.align(Alignment.CenterEnd).width(24.dp).fillMaxHeight()
+                Modifier.align(Alignment.CenterEnd).width(48.dp).fillMaxHeight()
                     .semantics {
                         contentDescription = "快速滚动条"
                         progressBarRangeInfo = ProgressBarRangeInfo(fraction, 0f..1f)
@@ -54,8 +54,8 @@ internal fun FastScrollList(resetKey: Any? = null, content: LazyListScope.() -> 
                         detectDragGestures(onDragStart = { jump(it) }) { change, _ -> change.consume(); jump(change.position) }
                     },
             ) {
-                Box(Modifier.align(Alignment.Center).width(3.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f), RoundedCornerShape(4.dp)))
-                Box(Modifier.align(Alignment.TopCenter).offset { IntOffset(0, (fraction * travel).roundToInt()) }.width(7.dp).height(with(LocalDensity.current) { thumb.toDp() }).background(Coral, RoundedCornerShape(8.dp)))
+                Box(Modifier.align(Alignment.Center).width(6.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f), RoundedCornerShape(4.dp)))
+                Box(Modifier.align(Alignment.TopCenter).offset { IntOffset(0, (fraction * travel).roundToInt()) }.width(14.dp).height(with(LocalDensity.current) { thumb.toDp() }).background(Coral, RoundedCornerShape(8.dp)))
             }
         }
     }

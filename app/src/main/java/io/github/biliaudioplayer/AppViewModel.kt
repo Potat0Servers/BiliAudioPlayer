@@ -12,8 +12,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import io.github.biliaudioplayer.domain.QueueBuilder
+import io.github.biliaudioplayer.domain.PlaybackLocator
 import io.github.biliaudioplayer.data.SessionExpiredException
 import io.github.biliaudioplayer.model.*
+import io.github.biliaudioplayer.update.UpdateController
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +26,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as BiliApplication
     private val repository = app.repository
     private val playback = app.playback
+    private val updater = UpdateController(app)
     private val mutableState = MutableStateFlow(AppUiState())
     val state = mutableState.asStateFlow()
     private val history = ArrayDeque<Screen>()
@@ -35,6 +38,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var queueVersion = 0L
     private var qrVersion = 0L
     private var nativeLoginPending = false
+    private var locationRequest = 0L
 
     val actions = AppActions(
         ::back, ::refresh, ::refreshQr, ::logout, ::openFolder, ::openVideo, ::playPart,
@@ -43,14 +47,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         { mutableState.update { it.copy(message = null) } }, ::cancelQueueBuild,
         { cancelLoading(); navigate(Screen.SETTINGS) },
         ::pinVideo, ::copySource, ::openSource,
-        { query -> mutableState.update { it.copy(videoQuery = query) } },
-        { query -> mutableState.update { it.copy(partQuery = query) } },
+        { query -> mutableState.update { it.copy(videoQuery = query, listTarget = null) } },
+        { query -> mutableState.update { it.copy(partQuery = query, listTarget = null) } },
         ::openAppLogin, ::useQrLogin,
+        ::locateCurrent,
+        updater::check, updater::download, updater::install,
     )
 
     init {
         viewModelScope.launch { playback.state.collect { value -> mutableState.update { it.copy(playback = value) } } }
         viewModelScope.launch { playback.queue.collect { value -> mutableState.update { it.copy(queue = value) } } }
+        viewModelScope.launch { updater.state.collect { value -> mutableState.update { it.copy(update = value) } } }
         restoreSession()
     }
     private fun report(error: Throwable) {
@@ -159,7 +166,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun openFolder(folder: FavoriteFolder) {
         navigate(Screen.FOLDER)
         mutableState.update { it.copy(selectedFolder = folder, videos = emptyList(), parts = emptyList(), selectedVideo = null, busy = true,
-            videoQuery = if (it.selectedFolder?.id == folder.id) it.videoQuery else "", partQuery = "") }
+            videoQuery = if (it.selectedFolder?.id == folder.id) it.videoQuery else "", partQuery = "", listTarget = null) }
         load {
             val videos = repository.videos(folder.id)
             partsCache.clear()
@@ -170,7 +177,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun openVideo(video: FavoriteVideo) {
         if (!video.available) { mutableState.update { it.copy(message = "这个视频已失效或不可访问") }; return }
         mutableState.update { it.copy(selectedVideo = video, parts = emptyList(), busy = true,
-            partQuery = if (it.selectedVideo?.bvid == video.bvid) it.partQuery else "") }
+            partQuery = if (it.selectedVideo?.bvid == video.bvid) it.partQuery else "", listTarget = null) }
         load {
             val parts = resolveParts(video)
             mutableState.update { it.copy(parts = parts) }
@@ -189,7 +196,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     mutableState.update { it.copy(queueProgress = "已读取 $done / $total 个视频") }
                 }
                 ensureActive()
-                playback.playQueue(result.tracks, result.startIndex)
+                playback.playQueue(result.tracks.map { it.copy(sourceFolder = folder) }, result.startIndex)
                 mutableState.update { it.copy(queueTitle = folder.title, message = null) }
                 navigate(Screen.PLAYER)
             } catch (e: Exception) { report(e) }
@@ -197,6 +204,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     private fun cancelQueueBuild() { queueVersion++; queueJob?.cancel(); mutableState.update { it.copy(buildingQueue = false, queueProgress = "") } }
+    private fun locateCurrent() {
+        val track = state.value.currentTrack ?: return
+        load {
+            // Fetch the source collection, rather than accidentally using a different open collection.
+            val location = PlaybackLocator(repository::videos) { video -> repository.parts(video) }.resolve(track)
+            currentCoroutineContext().ensureActive()
+            if (state.value.playback.currentId != track.id) { locateCurrent(); return@load }
+            partsCache[location.video.bvid] = location.parts
+            navigate(location.screen)
+            mutableState.update { it.copy(selectedFolder = location.folder, videos = location.videos,
+                selectedVideo = location.video, parts = location.parts, videoQuery = "", partQuery = "",
+                listTarget = ListTarget(location.screen, location.targetId, ++locationRequest)) }
+        }
+    }
     private fun pinFolder(folder: FavoriteFolder) {
         val mid = state.value.user?.mid ?: return
         app.pins.toggleFolder(mid, folder.id.toString())
@@ -257,7 +278,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         repository.logout()
         nativeLoginPending = false
         partsCache.clear(); history.clear()
-        mutableState.value = AppUiState(checkingSession = false, playback = playback.state.value)
+        mutableState.value = AppUiState(checkingSession = false, playback = playback.state.value, update = updater.state.value)
         refreshQr()
+    }
+
+    override fun onCleared() {
+        updater.close()
+        super.onCleared()
     }
 }
