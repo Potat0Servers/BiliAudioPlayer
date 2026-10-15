@@ -20,13 +20,17 @@ class UpdateRepository(
     private val client: OkHttpClient = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(45, TimeUnit.SECONDS).build(),
     private val latestUrl: HttpUrl = "https://api.github.com/repos/Potat0Servers/BiliAudioPlayer/releases/latest".toHttpUrl(),
     private val requireHttps: Boolean = true,
+    private val fallbackMetadataUrl: HttpUrl = "https://github.com/Potat0Servers/BiliAudioPlayer/releases/latest/download/update.json".toHttpUrl(),
+    private val taggedDownloadBaseUrl: HttpUrl = "https://github.com/Potat0Servers/BiliAudioPlayer/releases/download/".toHttpUrl(),
 ) : Closeable {
     fun check(currentVersionCode: Long): UpdateRelease? {
         val json = request(latestUrl.toString()).use { response ->
+            if (response.code == 403 || response.code == 429) return@use null
             if (response.code == 404) throw IOException("暂未发布可用更新")
             requireSuccess(response)
             JSONObject(readSmallBody(response))
         }
+        if (json == null) return checkWithoutApi(currentVersionCode)
         if (json.optBoolean("draft") || json.optBoolean("prerelease")) throw IOException("暂未发布正式更新")
         val assets = json.optJSONArray("assets") ?: throw IOException("更新附件缺失")
         val assetUrls = (0 until assets.length()).associate { index ->
@@ -35,14 +39,30 @@ class UpdateRepository(
         }
         val metadataUrl = assetUrls["update.json"] ?: throw IOException("缺少 update.json 更新说明")
         val metadata = request(metadataUrl).use { response -> requireSuccess(response); JSONObject(readSmallBody(response)) }
+        return parseMetadata(metadata, currentVersionCode) { _, apkName ->
+            assetUrls[apkName] ?: throw IOException("缺少更新 APK：$apkName")
+        }
+    }
+
+    private fun checkWithoutApi(currentVersionCode: Long): UpdateRelease? {
+        val metadata = request(fallbackMetadataUrl.toString()).use { response ->
+            requireSuccess(response)
+            JSONObject(readSmallBody(response))
+        }
+        return parseMetadata(metadata, currentVersionCode) { versionName, apkName ->
+            taggedDownloadBaseUrl.newBuilder().addPathSegment("v$versionName").addPathSegment(apkName).build().toString()
+        }
+    }
+
+    private fun parseMetadata(metadata: JSONObject, currentVersionCode: Long, apkAddress: (String, String) -> String): UpdateRelease? {
         val name = metadata.optString("versionName").trim()
         val code = metadata.optLong("versionCode", -1)
         val apkName = metadata.optString("apkName")
         val sha = metadata.optString("sha256").lowercase()
-        if (name.isBlank() || code <= 0 || !apkName.matches(Regex("[A-Za-z0-9._-]+\\.apk")) || !sha.matches(Regex("[a-f0-9]{64}"))) {
+        if (!name.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+")) || code <= 0 || !apkName.matches(Regex("[A-Za-z0-9._-]+\\.apk")) || !sha.matches(Regex("[a-f0-9]{64}"))) {
             throw IOException("更新说明格式无效")
         }
-        val apkUrl = assetUrls[apkName] ?: throw IOException("缺少更新 APK：$apkName")
+        val apkUrl = apkAddress(name, apkName)
         validateUrl(apkUrl)
         return if (code > currentVersionCode) UpdateRelease(name, code, apkName, sha, apkUrl) else null
     }

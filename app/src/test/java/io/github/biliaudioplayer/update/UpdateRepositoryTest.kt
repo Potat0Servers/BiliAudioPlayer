@@ -25,7 +25,9 @@ class UpdateRepositoryTest {
     @Before fun setUp() {
         server = MockWebServer()
         server.start()
-        repository = UpdateRepository(latestUrl = server.url("/latest"), requireHttps = false)
+        repository = UpdateRepository(latestUrl = server.url("/latest"), requireHttps = false,
+            fallbackMetadataUrl = server.url("/releases/latest/download/update.json"),
+            taggedDownloadBaseUrl = server.url("/releases/download/"))
     }
 
     @After fun tearDown() { repository.close(); server.shutdown() }
@@ -50,6 +52,25 @@ class UpdateRepositoryTest {
         assertTrue(expectFailure { repository.check(4) }.message!!.contains("update.json"))
         enqueueRelease(includeApk = false)
         assertTrue(expectFailure { repository.check(4) }.message!!.contains("APK"))
+    }
+
+    @Test fun apiRateLimitFallsBackToMetadataAndPinsApkToItsReleaseTag() {
+        server.enqueue(MockResponse().setResponseCode(403))
+        server.enqueue(MockResponse().setBody(metadata()))
+        val release = repository.check(4)!!
+        assertEquals(5L, release.versionCode)
+        assertEquals(server.url("/releases/download/v0.1.4/$apkName").toString(), release.apkUrl)
+        assertEquals("/latest", server.takeRequest().path)
+        assertEquals("/releases/latest/download/update.json", server.takeRequest().path)
+    }
+
+    @Test fun missingOrInvalidFallbackMetadataFailsRatherThanReportingLatest() {
+        server.enqueue(MockResponse().setResponseCode(403))
+        server.enqueue(MockResponse().setResponseCode(404))
+        assertTrue(expectFailure { repository.check(4) }.message!!.contains("404"))
+        server.enqueue(MockResponse().setResponseCode(429))
+        server.enqueue(MockResponse().setBody(metadata().replace("0.1.4", "../0.1.4")))
+        assertTrue(expectFailure { repository.check(4) }.message!!.contains("格式无效"))
     }
 
     @Test fun verifiedDownloadRemovesOldPartialAndReportsCompletion() {
@@ -89,8 +110,10 @@ class UpdateRepositoryTest {
         val assets = JSONArray().put(JSONObject().put("name", "update.json").put("browser_download_url", server.url("/update.json")))
         if (includeApk) assets.put(JSONObject().put("name", apkName).put("browser_download_url", server.url("/$apkName")))
         server.enqueue(MockResponse().setBody(JSONObject().put("assets", assets).toString()))
-        server.enqueue(MockResponse().setBody(JSONObject().put("versionName", "0.1.4").put("versionCode", 5).put("apkName", apkName).put("sha256", digest).toString()))
+        server.enqueue(MockResponse().setBody(metadata()))
     }
+
+    private fun metadata() = JSONObject().put("versionName", "0.1.4").put("versionCode", 5).put("apkName", apkName).put("sha256", digest).toString()
 
     private fun expectFailure(block: () -> Unit): IOException {
         try { block(); fail("Expected download/check failure") } catch (error: IOException) { return error }
