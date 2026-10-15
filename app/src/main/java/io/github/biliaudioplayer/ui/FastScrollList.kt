@@ -1,5 +1,9 @@
 package io.github.biliaudioplayer.ui
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -15,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -25,37 +30,52 @@ import kotlin.math.roundToInt
 @Composable
 internal fun FastScrollList(resetKey: Any? = null, targetIndex: Int? = null, targetRequest: Long? = null, content: LazyListScope.() -> Unit) {
     val listState = rememberLazyListState()
-    LaunchedEffect(resetKey, targetIndex, targetRequest) { listState.scrollToItem(targetIndex ?: 0) }
+    var dragFraction by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(resetKey, targetIndex, targetRequest) { dragFraction = null; listState.scrollToItem(targetIndex ?: 0) }
     val requests = remember { Channel<Int>(Channel.CONFLATED) }
     LaunchedEffect(listState) { for (index in requests) listState.scrollToItem(index) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        LazyColumn(state = listState, contentPadding = PaddingValues(end = 48.dp, bottom = 24.dp), content = content)
+        LazyColumn(state = listState, contentPadding = PaddingValues(end = 24.dp, bottom = 24.dp), content = content)
         val info = listState.layoutInfo
         if (info.totalItemsCount > 0 && (listState.canScrollForward || listState.canScrollBackward)) {
             val viewport = with(LocalDensity.current) { maxHeight.toPx() }
             val thumb = with(LocalDensity.current) { 48.dp.toPx() }.coerceAtMost(viewport)
             val travel = (viewport - thumb).coerceAtLeast(1f)
-            val visibleCount = info.visibleItemsInfo.size.coerceAtLeast(1)
-            val lastIndex = (info.totalItemsCount - visibleCount).coerceAtLeast(1)
-            val fraction = if (!listState.canScrollForward) 1f else (listState.firstVisibleItemIndex.toFloat() / lastIndex).coerceIn(0f, 1f)
-            fun jump(position: Offset) {
+            val firstSize = info.visibleItemsInfo.firstOrNull { it.index == listState.firstVisibleItemIndex }?.size?.coerceAtLeast(1) ?: 1
+            val position = listState.firstVisibleItemIndex + listState.firstVisibleItemScrollOffset.toFloat() / firstSize
+            val visibleCount = info.visibleItemsInfo.sumOf { item ->
+                val visiblePixels = (minOf(item.offset + item.size, info.viewportEndOffset) - maxOf(item.offset, info.viewportStartOffset)).coerceAtLeast(0)
+                visiblePixels.toDouble() / item.size.coerceAtLeast(1)
+            }.toFloat()
+            val fraction = when {
+                !listState.canScrollBackward -> 0f
+                !listState.canScrollForward -> 1f
+                else -> (position / (info.totalItemsCount - visibleCount).coerceAtLeast(1f)).coerceIn(0f, 1f)
+            }
+            // Follow the finger immediately; animate normal scrolling and the final settling motion.
+            val displayedFraction by animateFloatAsState(dragFraction ?: fraction,
+                animationSpec = if (dragFraction != null) snap() else tween(120, easing = FastOutSlowInEasing), label = "scroll-thumb")
+            fun jump(position: Offset, dragging: Boolean = false) {
                 val proportion = ((position.y - thumb / 2) / travel).coerceIn(0f, 1f)
+                if (dragging) dragFraction = proportion
                 requests.trySend((proportion * (info.totalItemsCount - 1)).roundToInt())
             }
             Box(
-                Modifier.align(Alignment.CenterEnd).width(48.dp).fillMaxHeight()
+                Modifier.align(Alignment.CenterEnd).width(24.dp).fillMaxHeight()
                     .semantics {
                         contentDescription = "快速滚动条"
                         progressBarRangeInfo = ProgressBarRangeInfo(fraction, 0f..1f)
-                        setProgress { value -> requests.trySend((value.coerceIn(0f, 1f) * (info.totalItemsCount - 1)).roundToInt()); true }
+                        setProgress { value -> dragFraction = null; requests.trySend((value.coerceIn(0f, 1f) * (info.totalItemsCount - 1)).roundToInt()); true }
                     }
                     .pointerInput(info.totalItemsCount, viewport) { detectTapGestures { jump(it) } }
                     .pointerInput(info.totalItemsCount, viewport) {
-                        detectDragGestures(onDragStart = { jump(it) }) { change, _ -> change.consume(); jump(change.position) }
+                        detectDragGestures(onDragStart = { jump(it, dragging = true) }, onDragEnd = { dragFraction = null }, onDragCancel = { dragFraction = null }) {
+                            change, _ -> change.consume(); jump(change.position, dragging = true)
+                        }
                     },
             ) {
                 Box(Modifier.align(Alignment.Center).width(6.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f), RoundedCornerShape(4.dp)))
-                Box(Modifier.align(Alignment.TopCenter).offset { IntOffset(0, (fraction * travel).roundToInt()) }.width(14.dp).height(with(LocalDensity.current) { thumb.toDp() }).background(Coral, RoundedCornerShape(8.dp)))
+                Box(Modifier.align(Alignment.TopCenter).offset { IntOffset(0, (displayedFraction * travel).roundToInt()) }.width(24.dp).height(with(LocalDensity.current) { thumb.toDp() }).background(Coral, RoundedCornerShape(8.dp)).testTag("fast-scroll-thumb"))
             }
         }
     }

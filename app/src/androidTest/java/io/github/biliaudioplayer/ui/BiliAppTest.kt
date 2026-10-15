@@ -19,12 +19,14 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import io.github.biliaudioplayer.model.AppActions
@@ -180,11 +182,13 @@ class BiliAppTest {
         assertEquals("Player must fit without vertical scrolling", 0f, range.maxValue(), 1f)
     }
 
-    @Test fun version013Both48DpListRailsJumpToEnd() {
+    @Test fun version014BothRailsPreserveContentWidthAndJumpToEnd() {
         val ui = mutableStateOf(AppUiState(screen = Screen.FOLDER, checkingSession = false,
             videos = (1..80).map { FavoriteVideo("BVfixture$it", "视频 $it") }))
         compose.setContent { BiliApp(ui.value, actions()) }
-        compose.onNodeWithContentDescription("快速滚动条").assertWidthIsEqualTo(48.dp).performTouchInput {
+        assertMenuMeetsRail("更多操作 视频 1")
+        compose.onNodeWithTag("fast-scroll-thumb", useUnmergedTree = true).assertWidthIsEqualTo(24.dp)
+        compose.onNodeWithContentDescription("快速滚动条").assertWidthIsEqualTo(24.dp).performTouchInput {
             swipe(center.copy(y = 1f), center.copy(y = height - 1f), durationMillis = 400)
         }
         compose.onNodeWithText("视频 80").assertIsDisplayed()
@@ -192,10 +196,52 @@ class BiliAppTest {
             ui.value = AppUiState(screen = Screen.PARTS, checkingSession = false,
                 parts = (1..80).map { Track("BVfixture", it.toLong(), it, "曲目 $it", "合集") })
         }
-        compose.onNodeWithContentDescription("快速滚动条").assertWidthIsEqualTo(48.dp).performTouchInput {
+        assertMenuMeetsRail("更多操作 曲目 1")
+        compose.onNodeWithTag("fast-scroll-thumb", useUnmergedTree = true).assertWidthIsEqualTo(24.dp)
+        compose.onNodeWithContentDescription("快速滚动条").assertWidthIsEqualTo(24.dp).performTouchInput {
             swipe(center.copy(y = 1f), center.copy(y = height - 1f), durationMillis = 400)
         }
         compose.onNodeWithText("曲目 80").assertIsDisplayed()
+    }
+
+    @Test fun version014ThumbAnimatesBetweenProgrammaticScrollPositions() {
+        compose.setContent {
+            BiliApp(AppUiState(screen = Screen.FOLDER, checkingSession = false,
+                videos = (1..80).map { FavoriteVideo("BVfixture$it", "视频 $it") }), actions())
+        }
+        val rail = compose.onNodeWithContentDescription("快速滚动条")
+        val thumb = compose.onNodeWithTag("fast-scroll-thumb", useUnmergedTree = true)
+        val initialTop = thumb.fetchSemanticsNode().boundsInRoot.top
+        compose.mainClock.autoAdvance = false
+        try {
+            rail.performSemanticsAction(SemanticsActions.SetProgress) { it(1f) }
+            compose.mainClock.advanceTimeByFrame()
+            compose.mainClock.advanceTimeByFrame()
+            val startingTop = thumb.fetchSemanticsNode().boundsInRoot.top
+            compose.mainClock.advanceTimeBy(60)
+            val middleTop = thumb.fetchSemanticsNode().boundsInRoot.top
+            compose.mainClock.advanceTimeBy(200)
+            val finalBounds = thumb.fetchSemanticsNode().boundsInRoot
+            val railBounds = rail.fetchSemanticsNode().boundsInRoot
+            assertTrue("Thumb should move gradually toward the bottom", middleTop > startingTop)
+            assertTrue("Animation should have a visible intermediate position", middleTop < finalBounds.top)
+            assertTrue("Thumb must move away from the starting position", finalBounds.top > initialTop)
+            assertEquals("Thumb should reach the bottom after the animation", railBounds.bottom, finalBounds.bottom, 1f)
+            compose.onNodeWithText("视频 80").assertIsDisplayed()
+        } finally { compose.mainClock.autoAdvance = true }
+    }
+
+    private fun assertMenuMeetsRail(description: String) {
+        val menuNode = compose.onNodeWithContentDescription(description).performScrollTo().fetchSemanticsNode()
+        val menu = menuNode.boundsInRoot
+        val row = generateSequence(menuNode.parent) { it.parent }
+            .firstOrNull { it.config.contains(SemanticsActions.OnLongClick) }
+            ?.boundsInRoot ?: error("Expected menu to be nested in a combined-clickable entry row")
+        val rail = compose.onNodeWithContentDescription("快速滚动条").fetchSemanticsNode().boundsInRoot
+        assertEquals("Entry row should end at the original 24dp rail boundary", rail.left, row.right, 0.5f)
+        assertTrue("Menu should remain entirely inside its entry row",
+            menu.left >= row.left - 0.5f && menu.right <= row.right + 0.5f &&
+                menu.top >= row.top - 0.5f && menu.bottom <= row.bottom + 0.5f)
     }
 
     @Test fun version013PlayerLocationAndQueueButtonsHaveIndependentActions() {

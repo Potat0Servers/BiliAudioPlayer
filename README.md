@@ -2,17 +2,17 @@
 
 一个将 B 站收藏夹作为歌单的原生 Android 音频播放器。支持 Android 8.0 及以上。
 
-当前版本为 **0.1.3**，支持从 [GitHub Release](https://github.com/Potat0Servers/BiliAudioPlayer/releases/latest) 下载更新。
+当前版本为 **0.1.4**，支持从 [GitHub Release](https://github.com/Potat0Servers/BiliAudioPlayer/releases/latest) 下载更新。
 
 ## 使用
 
-1. 安装 `artifacts/BiliAudioPlayer-0.1.3-debug.apk` 或 Release 中的同名安装包，打开「BiliAudioPlayer」。可直接覆盖旧版安装，保留登录与本地置顶。自行构建的文件位于 `app/build/outputs/apk/debug/app-debug.apk`。
+1. 安装 `artifacts/BiliAudioPlayer-0.1.4-debug.apk` 或 Release 中的同名安装包，打开「BiliAudioPlayer」。可直接覆盖旧版安装，保留登录与本地置顶。自行构建的文件位于 `app/build/outputs/apk/debug/app-debug.apk`。
 2. 默认尝试打开本机哔哩哔哩 App 确认授权；未安装或不适配时可选择扫码登录。同一台手机可以先截图，再在 B 站「扫一扫」中从相册选择。确认后自动同步。
 3. 首页显示自己创建的收藏夹。点击收藏夹查看视频；多 P 视频进入分 P 列表，单 P 视频直接播放。
 4. 选择曲目后，所属收藏夹按视频原序、分 P 原序组成队列。无法读取的视频不进入队列，所选曲目无法读取时显示错误。大收藏夹首次展开需要等待，可取消。
 5. 播放器提供进度跳转、暂停、上一曲 / 下一曲、顺序 / 列表循环 / 单曲循环 / 随机模式、队列点播，支持后台与系统媒体通知控制。
 6. 收藏夹通过图钉置顶；稿件和分P通过三点菜单置顶。设置按账号保存在本机，只改变浏览顺序。退出登录会清除登录会话并停止播放，保留该账号的置顶偏好。
-7. 视频和分 P 列表右侧拖动条可快速跳转；0.1.3 将可拖动区域加宽至48dp。首页齿轮进入设置页，可检查 GitHub Release 更新。
+7. 视频和分 P 列表右侧拖动条可快速跳转；0.1.4 恢复原来的24dp右侧留白，让列表内容恢复宽度，滑块占满24dp预留区。滑块在滚动和跳转时平滑移动，拖动时直接跟随手指。首页齿轮进入设置页，可检查 GitHub Release 更新。
 8. 稿件和分 P 可长按查看完整标题；右侧三点菜单包含置顶、复制源链接、跳转 B 站 App。
 9. 首页直接浏览收藏夹。进入收藏夹后，搜索栏仅筛选当前收藏夹的稿件标题；进入分P列表后，仅筛选当前稿件的分P标题。支持忽略英文大小写的关键词匹配，清空恢复完整列表。搜索不匹配UP主、BV号或所属合集，也不改变播放队列。
 10. 播放页右上角定位当前曲目：多P进入来源稿件的分P列表并滚动到该P，单P进入来源收藏夹并滚动到稿件。定位会清空搜索条件，保留置顶排序和播放进度；右下角按钮仍打开播放队列。
@@ -40,7 +40,7 @@ GitHub API 请求受限时，检查更新会改用同一 Release 的公开附件
 .\scripts\build.ps1 -Tasks assembleDebug -NoPublish
 
 # 已完成验证、提交与推送后，发布现有 APK
-.\scripts\publish-release.ps1 -ApkPath artifacts/BiliAudioPlayer-0.1.3-debug.apk
+.\scripts\publish-release.ps1 -ApkPath artifacts/BiliAudioPlayer-0.1.4-debug.apk
 ```
 
 Android Studio 或已有环境也可以使用 `gradlew.bat assembleDebug`（macOS/Linux：`./gradlew assembleDebug`）。本机工具路径写在被忽略的 `local.properties`。调试密钥保存在 `.tools/debug.keystore`，发布签名需自行配置。
@@ -60,6 +60,8 @@ Android Studio 或已有环境也可以使用 `gradlew.bat assembleDebug`（macO
 2026-10-15 用户已确认交付 APK 可扫码登录并显示自己的收藏夹；API35 模拟器已完成11项关键设备验证，含实际分 P 音轨播放、进度跳转、自动切歌、后台播放、媒体通知和置顶保存。24项单元测试、APK构建和lint通过。详细过程见《施工调试log.md》。
 
 0.1.3 已通过38项单元测试、APK构建与lint，以及8项定向设备检查：48dp拖动条、置顶排序后的定位、定位/队列按钮独立、来源元数据、更新状态按钮、真实APK身份与签名校验、FileProvider及系统安装页交接。更新测试包含 GitHub API 限流时读取 Release 附件直链。
+
+0.1.4 构建与lint通过；定向设备检查验证双列表恢复原内容宽度、24dp滑块不遮挡菜单、拖至末项、动画存在连续中间位置，以及原有曲目定位仍正常。
 
 ## 目录
 
