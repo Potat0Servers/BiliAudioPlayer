@@ -54,7 +54,9 @@ $credentialValues = @{}
 function Invoke-GitHub {
     param([string]$Path, [string]$Method = 'Get', $Body = $null, [switch]$AllowMissing)
     try {
-        $parameters = @{ Uri = "https://api.github.com/repos/$Repository/$Path"; Headers = $headers; Method = $Method }
+        $uri = "https://api.github.com/repos/$Repository"
+        if ($Path) { $uri += "/$Path" }
+        $parameters = @{ Uri = $uri; Headers = $headers; Method = $Method }
         if ($null -ne $Body) { $parameters.ContentType = 'application/json'; $parameters.Body = ($Body | ConvertTo-Json -Depth 8 -Compress) }
         return Invoke-RestMethod @parameters
     } catch {
