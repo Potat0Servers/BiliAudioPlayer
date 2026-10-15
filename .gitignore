@@ -9,3 +9,8 @@ local.properties
 *.keystore
 .DS_Store
 captures/
+
+# Local plans and construction notes
+/施工调试log.md
+/更新计划.md
+/b站分p播放器编写计划.md

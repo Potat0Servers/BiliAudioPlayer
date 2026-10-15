@@ -41,6 +41,8 @@ import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
@@ -63,6 +65,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
@@ -270,9 +273,6 @@ private fun HomeScreen(state: AppUiState, actions: AppActions, logout: () -> Uni
                 IconButton(onClick = actions.showSettings) { Icon(Icons.Default.Settings, "设置", tint = Muted) }
                 IconButton(onClick = logout) { Icon(Icons.Default.Logout, "退出登录", tint = Muted) }
             }
-            LibrarySearchPanel(state.searchQuery, state.searchKinds, state.search.hits, state.search.loading, state.search.progress,
-                actions.searchQuery, actions.searchKinds, actions.openSearchHit, Modifier.padding(horizontal = 24.dp, vertical = 8.dp), state.search.error)
-            if (state.searchQuery.isBlank()) {
             Column(Modifier.padding(horizontal = 24.dp)) {
                 Text("我的音乐收藏", style = MaterialTheme.typography.headlineLarge)
                 Spacer(Modifier.height(8.dp))
@@ -288,10 +288,8 @@ private fun HomeScreen(state: AppUiState, actions: AppActions, logout: () -> Uni
             }
             Spacer(Modifier.height(12.dp))
             if (state.busy && state.folders.isNotEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth())
-            }
         }
         when {
-            state.searchQuery.isNotBlank() -> Unit
             state.busy && state.folders.isEmpty() -> item { LoadingState("正在读取收藏夹", Modifier.height(260.dp)) }
             state.folders.isEmpty() -> item { EmptyState("暂未读取到收藏夹", "在 B 站收藏喜欢的视频，再回来刷新。", Modifier.heightIn(min = 260.dp), actionLabel = "刷新", action = actions.refresh) }
             else -> itemsIndexed(state.folders.sortedByDescending { it.id.toString() in state.pinnedFolders }, key = { _, folder -> folder.id }) { _, folder ->
@@ -323,24 +321,30 @@ private fun FolderCard(folder: FavoriteFolder, pinned: Boolean, open: () -> Unit
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun FolderScreen(state: AppUiState, actions: AppActions, showFullTitle: (String) -> Unit) {
+    val visibleVideos = remember(state.videos, state.videoQuery, state.pinnedVideos) {
+        state.videos.filter { it.title.contains(state.videoQuery.trim(), ignoreCase = true) }
+            .sortedByDescending { it.bvid in state.pinnedVideos }
+    }
     Column(Modifier.fillMaxSize()) {
         PageHeader("收藏夹", actions.back, actions.refresh, state.busy)
+        TitleSearchField(state.videoQuery, "稿件", actions.videoQuery)
         if (state.busy && state.videos.isNotEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth())
-        FastScrollList {
+        FastScrollList(resetKey = state.videoQuery) {
             item {
                 Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
                     Artwork(state.selectedFolder?.cover.orEmpty(), Modifier.size(98.dp))
                     Column(Modifier.weight(1f).padding(start = 18.dp)) {
                         Text(state.selectedFolder?.title.orEmpty(), style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
                         Spacer(Modifier.height(8.dp))
-                        Text("${state.videos.size} 个视频 · 点击查看分 P", style = MaterialTheme.typography.bodySmall, color = Muted)
+                        Text(if (state.videoQuery.isBlank()) "${state.videos.size} 个视频 · 点击查看分 P" else "${visibleVideos.size} / ${state.videos.size} 个稿件", style = MaterialTheme.typography.bodySmall, color = Muted)
                     }
                 }
                 SectionLabel("收藏的视频")
             }
             if (state.busy && state.videos.isEmpty()) item { LoadingState("正在读取视频", Modifier.height(260.dp)) }
             else if (state.videos.isEmpty()) item { EmptyState("暂无可显示的视频", "收藏视频后刷新即可查看。", Modifier.heightIn(min = 260.dp), actionLabel = "刷新", action = actions.refresh) }
-            itemsIndexed(state.videos.sortedByDescending { it.bvid in state.pinnedVideos }, key = { _, video -> video.bvid }) { index, video ->
+            else if (visibleVideos.isEmpty()) item { EmptyState("没有匹配的稿件", "试试其他标题关键词。", Modifier.heightIn(min = 220.dp), actionLabel = "清空搜索", action = { actions.videoQuery("") }) }
+            itemsIndexed(visibleVideos, key = { _, video -> video.bvid }) { index, video ->
                 Row(
                     Modifier.fillMaxWidth().combinedClickable(
                         onClick = { if (video.available) actions.openVideo(video) },
@@ -357,7 +361,7 @@ private fun FolderScreen(state: AppUiState, actions: AppActions, showFullTitle: 
                     EntryMenu(video.title, video.bvid in state.pinnedVideos,
                         { actions.pinVideo(video) }, { actions.copySource(video.bvid, 1) }, { actions.openSource(video.bvid, 1) })
                 }
-                if (index != state.videos.lastIndex) HorizontalDivider(Modifier.padding(start = 102.dp, end = 24.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                if (index != visibleVideos.lastIndex) HorizontalDivider(Modifier.padding(start = 102.dp, end = 24.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             }
         }
     }
@@ -366,10 +370,15 @@ private fun FolderScreen(state: AppUiState, actions: AppActions, showFullTitle: 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun PartsScreen(state: AppUiState, actions: AppActions, showFullTitle: (String) -> Unit) {
+    val visibleParts = remember(state.parts, state.partQuery, state.pinnedParts) {
+        state.parts.filter { it.title.contains(state.partQuery.trim(), ignoreCase = true) }
+            .sortedByDescending { it.id in state.pinnedParts }
+    }
     Column(Modifier.fillMaxSize()) {
         PageHeader("分 P 曲目", actions.back, actions.refresh, state.busy)
+        TitleSearchField(state.partQuery, "分P", actions.partQuery)
         if (state.busy && state.parts.isNotEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth())
-        FastScrollList {
+        FastScrollList(resetKey = state.partQuery) {
             item {
                 Column(Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
                     Artwork(state.selectedVideo?.cover.orEmpty(), Modifier.fillMaxWidth().aspectRatio(16f / 9f))
@@ -381,7 +390,7 @@ private fun PartsScreen(state: AppUiState, actions: AppActions, showFullTitle: (
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("全部曲目", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.width(8.dp))
-                        CountChip(state.parts.size.toString())
+                        CountChip(if (state.partQuery.isBlank()) state.parts.size.toString() else "${visibleParts.size}/${state.parts.size}")
                         Spacer(Modifier.weight(1f))
                         Text("置顶仅保存在本机", style = MaterialTheme.typography.labelSmall, color = Muted)
                     }
@@ -389,7 +398,8 @@ private fun PartsScreen(state: AppUiState, actions: AppActions, showFullTitle: (
             }
             if (state.busy && state.parts.isEmpty()) item { LoadingState("正在读取分 P", Modifier.height(220.dp)) }
             else if (state.parts.isEmpty()) item { EmptyState("暂时没有曲目", "请刷新重试。", Modifier.heightIn(min = 220.dp), actionLabel = "刷新", action = actions.refresh) }
-            itemsIndexed(state.parts.sortedByDescending { it.id in state.pinnedParts }, key = { _, track -> track.id }) { _, track ->
+            else if (visibleParts.isEmpty()) item { EmptyState("没有匹配的分P", "试试其他标题关键词。", Modifier.heightIn(min = 220.dp), actionLabel = "清空搜索", action = { actions.partQuery("") }) }
+            itemsIndexed(visibleParts, key = { _, track -> track.id }) { _, track ->
                 val current = track.id == state.playback.currentId
                 Row(
                     Modifier.fillMaxWidth().background(if (current) SoftCoral.copy(alpha = 0.65f) else Color.Transparent)
@@ -414,6 +424,22 @@ private fun PartsScreen(state: AppUiState, actions: AppActions, showFullTitle: (
             }
         }
     }
+}
+
+@Composable
+private fun TitleSearchField(query: String, kind: String, onQueryChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = query, onValueChange = onQueryChange, singleLine = true,
+        label = { Text("搜索${kind}标题") },
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 6.dp),
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        trailingIcon = {
+            if (query.isNotEmpty()) IconButton(onClick = { onQueryChange("") }) {
+                Icon(Icons.Default.Clear, "清空${kind}搜索")
+            }
+        },
+        shape = RoundedCornerShape(18.dp),
+    )
 }
 
 @Composable

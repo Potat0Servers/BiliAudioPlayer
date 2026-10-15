@@ -23,8 +23,9 @@ import kotlin.math.roundToInt
 
 /** A draggable right rail targets item indices, so jumps do not require traversing intermediate rows. */
 @Composable
-internal fun FastScrollList(content: LazyListScope.() -> Unit) {
+internal fun FastScrollList(resetKey: Any? = null, content: LazyListScope.() -> Unit) {
     val listState = rememberLazyListState()
+    LaunchedEffect(resetKey) { listState.scrollToItem(0) }
     val requests = remember { Channel<Int>(Channel.CONFLATED) }
     LaunchedEffect(listState) { for (index in requests) listState.scrollToItem(index) }
     BoxWithConstraints(Modifier.fillMaxSize()) {

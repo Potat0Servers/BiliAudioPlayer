@@ -12,10 +12,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import io.github.biliaudioplayer.domain.QueueBuilder
-import io.github.biliaudioplayer.domain.LibrarySearchEngine
-import io.github.biliaudioplayer.domain.SearchKind
-import io.github.biliaudioplayer.domain.SearchHit
-import io.github.biliaudioplayer.domain.SearchSnapshot
 import io.github.biliaudioplayer.data.SessionExpiredException
 import io.github.biliaudioplayer.model.*
 import kotlinx.coroutines.*
@@ -38,9 +34,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var loadingVersion = 0L
     private var queueVersion = 0L
     private var qrVersion = 0L
-    private val searchEngine = LibrarySearchEngine(repository)
-    private var searchJob: Job? = null
-    private var searchVersion = 0L
     private var nativeLoginPending = false
 
     val actions = AppActions(
@@ -50,7 +43,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         { mutableState.update { it.copy(message = null) } }, ::cancelQueueBuild,
         { cancelLoading(); navigate(Screen.SETTINGS) },
         ::pinVideo, ::copySource, ::openSource,
-        ::updateSearchQuery, ::updateSearchKinds, ::openSearchHit, ::openAppLogin, ::useQrLogin,
+        { query -> mutableState.update { it.copy(videoQuery = query) } },
+        { query -> mutableState.update { it.copy(partQuery = query) } },
+        ::openAppLogin, ::useQrLogin,
     )
 
     init {
@@ -143,10 +138,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             Screen.HOME -> {
                 val user = state.value.user ?: return
                 load {
-                    searchEngine.invalidate(user.mid)
                     val folders = repository.folders(user.mid)
                     mutableState.update { it.copy(folders = folders) }
-                    if (state.value.searchQuery.isNotBlank()) launchSearch()
                 }
             }
             Screen.FOLDER -> state.value.selectedFolder?.let(::openFolder)
@@ -156,18 +149,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
     private fun navigate(screen: Screen) {
         if (screen == state.value.screen) return
-        if (state.value.screen == Screen.HOME) { searchVersion++; searchJob?.cancel() }
         history.addLast(state.value.screen)
         mutableState.update { it.copy(screen = screen) }
     }
     private fun back() {
         cancelLoading()
         if (history.isNotEmpty()) mutableState.update { it.copy(screen = history.removeLast()) }
-        if (state.value.screen == Screen.HOME && state.value.searchQuery.isNotBlank()) launchSearch()
     }
     private fun openFolder(folder: FavoriteFolder) {
         navigate(Screen.FOLDER)
-        mutableState.update { it.copy(selectedFolder = folder, videos = emptyList(), parts = emptyList(), selectedVideo = null, busy = true) }
+        mutableState.update { it.copy(selectedFolder = folder, videos = emptyList(), parts = emptyList(), selectedVideo = null, busy = true,
+            videoQuery = if (it.selectedFolder?.id == folder.id) it.videoQuery else "", partQuery = "") }
         load {
             val videos = repository.videos(folder.id)
             partsCache.clear()
@@ -177,7 +169,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun resolveParts(video: FavoriteVideo): List<Track> = partsCache[video.bvid] ?: repository.parts(video).also { partsCache[video.bvid] = it }
     private fun openVideo(video: FavoriteVideo) {
         if (!video.available) { mutableState.update { it.copy(message = "这个视频已失效或不可访问") }; return }
-        mutableState.update { it.copy(selectedVideo = video, parts = emptyList(), busy = true) }
+        mutableState.update { it.copy(selectedVideo = video, parts = emptyList(), busy = true,
+            partQuery = if (it.selectedVideo?.bvid == video.bvid) it.partQuery else "") }
         load {
             val parts = resolveParts(video)
             mutableState.update { it.copy(parts = parts) }
@@ -235,45 +228,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         mutableState.update { it.copy(message = "未找到可打开链接的哔哩哔哩 App") }
     }
-    private fun updateSearchQuery(query: String) {
-        mutableState.update { it.copy(searchQuery = query) }
-        launchSearch()
-    }
-    private fun updateSearchKinds(kinds: Set<SearchKind>) {
-        mutableState.update { it.copy(searchKinds = kinds) }
-        launchSearch()
-    }
-    private fun launchSearch() {
-        val version = ++searchVersion
-        searchJob?.cancel()
-        val current = state.value
-        val mid = current.user?.mid ?: return
-        if (current.searchQuery.isBlank() || current.searchKinds.isEmpty()) {
-            mutableState.update { it.copy(search = SearchSnapshot()) }
-            return
-        }
-        mutableState.update { it.copy(search = searchEngine.filter(mid, current.searchQuery, current.searchKinds).copy(loading = true)) }
-        searchJob = viewModelScope.launch {
-            delay(300)
-            searchEngine.search(mid, current.searchQuery, current.searchKinds,
-                current.folders.takeUnless { current.busy && it.isEmpty() }) { snapshot ->
-                if (version == searchVersion) mutableState.update { it.copy(search = snapshot) }
-            }
-        }
-    }
-    private fun openSearchHit(hit: SearchHit) {
-        if (hit.video == null) { openFolder(hit.folder); return }
-        navigate(Screen.FOLDER)
-        mutableState.update { it.copy(selectedFolder = hit.folder, selectedVideo = hit.video, videos = emptyList(), parts = emptyList()) }
-        load {
-            val videos = repository.videos(hit.folder.id)
-            mutableState.update { it.copy(videos = videos) }
-            val parts = resolveParts(hit.video)
-            mutableState.update { it.copy(parts = parts) }
-            if (hit.track != null) playPart(hit.track)
-            else if (parts.size == 1) playPart(parts.first()) else navigate(Screen.PARTS)
-        }
-    }
     private fun useQrLogin() {
         nativeLoginPending = false
         mutableState.update { it.copy(loginMethod = LoginMethod.QR) }
@@ -301,7 +255,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         cancelLoading(); qrVersion++; qrJob?.cancel(); cancelQueueBuild()
         playback.clear()
         repository.logout()
-        searchVersion++; searchJob?.cancel(); searchEngine.invalidate(); nativeLoginPending = false
+        nativeLoginPending = false
         partsCache.clear(); history.clear()
         mutableState.value = AppUiState(checkingSession = false, playback = playback.state.value)
         refreshQr()

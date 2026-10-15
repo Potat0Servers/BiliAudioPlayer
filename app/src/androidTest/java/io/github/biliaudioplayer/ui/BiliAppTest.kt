@@ -16,10 +16,14 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.Density
@@ -198,6 +202,50 @@ class BiliAppTest {
         compose.onNodeWithText("曲目 80").assertIsDisplayed()
     }
 
+    @Test fun version012SearchIsLocalToListTitlesAndAbsentFromHome() {
+        val video = FavoriteVideo("BVtarget", "Morning Piano", owner = "演奏者")
+        val otherVideo = FavoriteVideo("BVother", "其他稿件", owner = "Morning")
+        val part = Track(video.bvid, 201, 1, "独立分P标题", "合集", owner = "演奏者")
+        val otherPart = Track(video.bvid, 202, 2, "其他分P", "独立分P标题合集", owner = "独立分P标题")
+        val ui = mutableStateOf(AppUiState(screen = Screen.HOME, checkingSession = false))
+        var openedVideo: FavoriteVideo? = null
+        var playedPart: Track? = null
+        compose.setContent {
+            BiliApp(ui.value, actions(
+                videoQuery = { ui.value = ui.value.copy(videoQuery = it) },
+                partQuery = { ui.value = ui.value.copy(partQuery = it) },
+                openVideo = { openedVideo = it }, playPart = { playedPart = it },
+            ))
+        }
+        compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.EditableText)).assertCountEquals(0)
+        compose.runOnIdle {
+            ui.value = AppUiState(screen = Screen.FOLDER, checkingSession = false,
+                selectedFolder = FavoriteFolder(1, "Morning 收藏夹"), videos = listOf(video, otherVideo), parts = listOf(part))
+        }
+        compose.onNodeWithText("搜索稿件标题").performTextInput("morning")
+        compose.onNodeWithText("Morning Piano").assertIsDisplayed().performClick()
+        compose.onAllNodes(hasText("其他稿件")).assertCountEquals(0)
+        compose.runOnIdle { assertEquals(video, openedVideo); assertEquals(2, ui.value.videos.size) }
+        compose.onNodeWithText("搜索稿件标题").performTextReplacement("独立分P标题")
+        compose.onNodeWithText("没有匹配的稿件").assertIsDisplayed()
+        compose.onNodeWithContentDescription("清空稿件搜索").performClick()
+        compose.onNodeWithText("其他稿件").assertIsDisplayed()
+        compose.runOnIdle {
+            ui.value = AppUiState(screen = Screen.PARTS, checkingSession = false,
+                selectedVideo = video, parts = listOf(part, otherPart))
+        }
+        compose.onNodeWithText("搜索分P标题").performTextInput("独立分P标题")
+        compose.onAllNodes(hasText("其他分P")).assertCountEquals(0)
+        compose.onNode(hasText("独立分P标题") and SemanticsMatcher("非搜索输入框") {
+            !it.config.contains(SemanticsProperties.EditableText)
+        }).assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(part, playedPart); assertEquals(2, ui.value.parts.size) }
+        compose.onNodeWithContentDescription("清空分P搜索").performClick()
+        compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex))
+            .performScrollToNode(hasText("其他分P"))
+        compose.onNodeWithText("其他分P").assertIsDisplayed()
+    }
+
     private fun actions(
         back: () -> Unit = {},
         refreshQr: () -> Unit = {},
@@ -208,6 +256,8 @@ class BiliAppTest {
         playQueueIndex: (Int) -> Unit = {},
         cancelQueueBuild: () -> Unit = {},
         showSettings: () -> Unit = {},
+        videoQuery: (String) -> Unit = {},
+        partQuery: (String) -> Unit = {},
     ) = AppActions(
         back = back,
         refresh = {},
@@ -229,5 +279,7 @@ class BiliAppTest {
         dismissMessage = {},
         cancelQueueBuild = cancelQueueBuild,
         showSettings = showSettings,
+        videoQuery = videoQuery,
+        partQuery = partQuery,
     )
 }

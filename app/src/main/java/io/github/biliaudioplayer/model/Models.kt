@@ -1,9 +1,5 @@
 package io.github.biliaudioplayer.model
 
-import io.github.biliaudioplayer.domain.SearchKind
-import io.github.biliaudioplayer.domain.SearchSnapshot
-import io.github.biliaudioplayer.domain.SearchHit
-
 data class UserProfile(val mid: Long, val name: String, val avatar: String = "")
 data class FavoriteFolder(val id: Long, val title: String, val cover: String = "", val mediaCount: Int = 0)
 data class FavoriteVideo(
@@ -39,8 +35,7 @@ data class AppUiState(
     val pinnedVideos: Set<String> = emptySet(),
     val qr: QrTicket? = null, val qrMessage: String = "", val qrExpired: Boolean = false,
     val loginMethod: LoginMethod = LoginMethod.APP,
-    val searchQuery: String = "", val searchKinds: Set<SearchKind> = SearchKind.entries.toSet(),
-    val search: SearchSnapshot = SearchSnapshot(),
+    val videoQuery: String = "", val partQuery: String = "",
     val queue: List<Track> = emptyList(), val queueTitle: String = "", val buildingQueue: Boolean = false,
     val queueProgress: String = "", val playback: PlaybackUiState = PlaybackUiState(), val message: String? = null,
 ) {
@@ -59,9 +54,8 @@ data class AppActions(
     val pinVideo: (FavoriteVideo) -> Unit = {},
     val copySource: (String, Int) -> Unit = { _, _ -> },
     val openSource: (String, Int) -> Unit = { _, _ -> },
-    val searchQuery: (String) -> Unit = {},
-    val searchKinds: (Set<SearchKind>) -> Unit = {},
-    val openSearchHit: (SearchHit) -> Unit = {},
+    val videoQuery: (String) -> Unit = {},
+    val partQuery: (String) -> Unit = {},
     val openAppLogin: () -> Unit = {},
     val useQrLogin: () -> Unit = {},
 )
